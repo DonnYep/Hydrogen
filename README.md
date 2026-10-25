@@ -62,7 +62,7 @@ Hydrogen 的目标是**轻便易用**，所以刻意只做一件事：把 TCP �
 | --- | --- |
 | **单类实现**（一个 `TcpClient` + 一个 `IHeaderEncoder` 接口） | 不用学框架、不用装配件，丢进工程就能用 |
 | **零依赖** | 只用到 `UnityEngine.Debug` 记日志，替换 `Hydrogen.Log` 后就完全不依赖 Unity |
-| **全异步**（`BeginRead` / `BeginWrite`） | 不占协程、不自己开线程、不产生 `Task` 与 GC 压力 |
+| **全异步**（`BeginRead` / `BeginWrite`） | 不占协程、不自己开线程、不产生 `Task`（每帧一次小数组分配） |
 | **帧头可插拔**（`IHeaderEncoder`） | 2 字节长度、4 字节长度、protobuf varint 都由你定；库只负责"按你的头切帧" |
 | **粘包 / 半包自动处理** | 业务回调拿到的永远是**一条完整消息**，不用自己拼缓冲 |
 | **失败可见** | 连接被拒、超时、读写异常、对端关闭都会走 `OnDisconnected` 并写明原因，不会静默卡死 |
@@ -122,13 +122,14 @@ client.SendMessage(payload);        // 发一条完整消息（库自动加 head
 ### 2.1 连接、断开与重连
 
 ```csharp
-client.Connect(host, port);   // 会先清理上一条连接，所以重连不必手动 Disconnect
+client.Connect(host, port);   // 会先断开上一条连接（旧连接收到一次 OnDisconnected），重连不必手动 Disconnect
 client.Disconnect();          // 可重复调用；每个连接最多触发一次 OnDisconnected
 // 之后可以再次 Connect：同一实例支持反复重连
 ```
 
 - **连接超时**：`client.ConnectTimeoutMs = 5000;`（≤0 表示不设超时）。超时会走 `OnDisconnected` 并记 `connect failed : timeout`。
 - **连接失败**（端口没人监听、DNS 无效等）同样走 `OnDisconnected`，日志是 `connect failed : <原因>`。
+- **DNS 解析**：`Connect` 内部同步调用 `Dns.GetHostAddresses`，只尝试返回的**第一个地址**，没有 IPv4/IPv6 回退；主线程里传域名可能阻塞，建议直接传 IP。
 - **不要把 `Connected` 当心跳**：它只表示"框架认为仍连接着"；TCP 半开连接要靠业务心跳发现（见 §5.1）。
 
 ### 2.2 发送
@@ -144,6 +145,8 @@ client.SendMessage(bytes);    // 长度 1 ~ 65535
 | 空数组 / `null` | 拒绝并 `Log.Error` |
 | 超过 `MAX_MESSAGE_LENGTH`（65535） | 拒绝并 `Log.Error`——长度头只有 2 字节，**绝不截断**（截断会让整条流从此刻起错位） |
 | 已断开（未 `Connect`） | 拒绝并 `Log.Error`，**不排队**——避免把过期消息发到下一条连接上 |
+
+> 连接断开时，**已入队但尚未写出的消息会被清空**，不会补发到下一条连接。
 
 ### 2.3 接收
 
@@ -190,11 +193,12 @@ client.Dispatcher = UnityMainThread.Post;
 ### 2.5 释放
 
 ```csharp
-client.Dispose();      // 断开 + 清空回调，之后不可再用
+client.Dispose();      // 先断开（触发一次 OnDisconnected）再清空回调，之后不可再用
 // 或者：client.Disconnect();  之后仍可 Connect 复用
 ```
 
 `TcpClient` 实现了 `IDisposable`，建议在 `OnDestroy` 里 `Dispose()`。
+`Dispose()` 触发的 `OnDisconnected` 发生在清空回调之前，所以已注册的处理函数仍会被调用一次。
 
 ## 3. 事件与属性
 
@@ -224,7 +228,7 @@ client.Dispose();      // 断开 + 清空回调，之后不可再用
 ```
 
 - `SendMessage` 可在任意线程调用（内部加锁排队）；
-- `Connect` / `Disconnect` / `Dispose` 建议在业务主线程调用；
+- `Connect` / `Disconnect` / `Dispose` 建议在业务主线程调用（`Connect` 的域名解析是同步的，可能卡主线程，见 §6）；
 - 回调线程 = I/O 线程（未设置 `Dispatcher` 时）。
 
 ## 5. 常见场景
@@ -289,6 +293,8 @@ Hydrogen.Log.Error   = obj => Debug.LogError(obj);     // 默认就是这三个
 | 无心跳 / 无自动重连 | 库只管连接与收发，策略由业务实现（§5.1） |
 | 无 TLS / 压缩 | 需要时自行包 `SslStream` |
 | `SendTimeout` / `ReceiveTimeout` 对异步无效 | 异步 I/O 不使用这两个属性 |
+| `Connect` 的 DNS 解析是同步的 | 只尝试 DNS 返回的第一个地址，无 IPv4/IPv6 回退；主线程传域名可能阻塞 |
+| 断线不补发 | 断开时发送队列被清空，已排队但未写出的消息会丢弃 |
 | 不保证"对端一定收到" | TCP 只保证有序可靠传输，业务层仍需自己的应答/序号机制 |
 
 ## 7. 验证
@@ -325,7 +331,8 @@ Hydrogen/                 ← 仓库根 = 包根
 │   ├── IHeaderEncoder.cs
 │   ├── Log.cs
 │   └── DisconnectResion.cs
-└── .gitattributes        ← 统一 LF 换行、标记二进制
+├── .gitattributes        ← 统一 LF 换行、标记二进制
+└── .gitignore            ← 忽略 Library / Temp 等 Unity 生成物
 ```
 
 `Runtime/` 与 `Assembly-CSharp` 分离，包内代码只在 `Hydrogen` 程序集里编译，不会污染业务程序集；

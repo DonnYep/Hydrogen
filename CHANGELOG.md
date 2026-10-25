@@ -5,7 +5,7 @@
 
 ## [0.1.0] - 2026-10-25
 
-首个可直接通过 Git URL 安装的 UPM 版本。**代码逻辑未改动**，只调整包的形态。
+首个可直接通过 Git URL 安装的 UPM 版本。以包形态调整为主，另修复一处连接失败通知缺失。
 
 ### Added
 
@@ -25,17 +25,13 @@
 - `LICENSE` → `LICENSE.md`，符合 Unity 包的许可证文件约定。
 - `Hydrogen.asmdef` 补上 `rootNamespace: "Hydrogen"`（影响新建脚本的默认命名空间，不影响编译）。
 
-### Removed
-
-- `package.json.meta`、`README.md.meta`：文档类文件不属于 Unity 资源，不需要 meta。
-
 ### Fixed
 
 - README 的 `IHeaderEncoder` 示例使用了 `System.Buffers.Binary.BinaryPrimitives`，
   该类在 Unity 2020.3 默认的 .NET Standard 2.0 下**不存在**（会导致示例直接编译失败），
   改为纯字节运算实现。
 - README 里指向仓库外 `Docs/HYDROGEN.md` 的失效相对链接。
-- README 中「裁剪用例数」前后不一致的表述，改为不依赖具体数字的验证范围描述。
+- DNS 解析失败时只记日志、不触发 `OnDisconnected`——连接失败对业务不可见；现在与端口拒绝、超时一致，通知一次断开。
 
 ## [0.0.1] - 2026-10-25
 
