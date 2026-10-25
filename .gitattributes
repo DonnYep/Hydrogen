@@ -1,0 +1,30 @@
+# 仓库内一律按 LF 存储、按 LF 检出：Windows / macOS 协作不产生无意义 diff
+* text=auto eol=lf
+
+# 便于 diff 与语言统计
+*.cs     text eol=lf diff=csharp
+*.asmdef text eol=lf
+*.json   text eol=lf
+*.md     text eol=lf
+*.ps1    text eol=lf
+*.sh     text eol=lf
+
+# Unity 元数据 / 场景 / 资源：字节原样保存，禁止任何换行转换
+*.meta   -text
+*.unity  -text
+*.asset  -text
+*.prefab -text
+*.mat    -text
+*.controller -text
+
+# 二进制
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.psd  binary
+*.tga  binary
+*.ttf  binary
+*.otf  binary
+*.zip  binary
+*.dll  binary
