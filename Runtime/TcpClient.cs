@@ -144,7 +144,7 @@ namespace Hydrogen
                 var addresses = Dns.GetHostAddresses(host);
                 if (addresses == null || addresses.Length == 0)
                 {
-                    OnDisconnectedHandler(DisconnectResion.Exception, "[Hydrogen] connect failed : host invalid");
+                    OnConnectFailed("[Hydrogen] connect failed : host invalid");
                     return;
                 }
                 var address = addresses[0];
@@ -159,7 +159,7 @@ namespace Hydrogen
             }
             catch (Exception e)
             {
-                OnDisconnectedHandler(DisconnectResion.Exception, $"[Hydrogen] connect failed : {e.Message}");
+                OnConnectFailed($"[Hydrogen] connect failed : {e.Message}");
             }
         }
         /// <summary>
@@ -497,6 +497,21 @@ namespace Hydrogen
                 return;
             }
             dispatcher(action);
+        }
+        /// <summary>
+        /// 连接阶段失败：写日志并通知一次断开。
+        /// <para>DNS 解析失败时还没创建 socket，<see cref="Disconnect"/> 的 wasConnected 为 false，
+        /// 不会触发事件，所以这里必须直接补发一次。</para>
+        /// </summary>
+        void OnConnectFailed(string message)
+        {
+            Log.Error(message);
+            if (client != null)
+            {
+                Disconnect();
+                return;
+            }
+            Dispatch(onDisconnected);
         }
         void OnDisconnectedHandler(DisconnectResion reason, string message)
         {
